@@ -1,0 +1,1163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dungeon Sweeper: Roguelike RPG</title>
+    <!-- Load Tailwind CSS for utility styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* --- PIXEL ART BASE STYLE --- */
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        
+        body {
+            /* Using a dark, muted palette suitable for dungeons */
+            background-color: #2c3e50; /* Deep blue-gray */
+            font-family: 'Inter', sans-serif;
+            color: #ecf0f1; /* Light text */
+        }
+        
+        .pixel-font {
+            font-family: 'Press Start 2P', cursive;
+            text-shadow: 2px 2px #000000;
+        }
+
+        .pixel-shadow {
+            box-shadow: 4px 4px 0 #1c1c1c; /* 8-bit shadow effect */
+            border: 2px solid #000000;
+        }
+
+        /* --- GAME GRID STYLES --- */
+        .game-grid {
+            display: grid;
+            grid-template-columns: repeat(var(--cols), 1fr);
+            border: 6px solid #4a6984;
+            box-shadow: 6px 6px 0 #1c1c1c;
+            max-width: fit-content;
+            margin: auto;
+        }
+        .cell {
+            width: 36px;
+            height: 36px;
+            background-color: #34495e; /* Covered tile */
+            border: 1px solid #2c3e50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #ecf0f1;
+            cursor: pointer;
+            transition: background-color 0.05s;
+            user-select: none;
+        }
+        .cell:hover:not(.uncovered) {
+            background-color: #4e6377; /* Hover effect */
+        }
+        .uncovered {
+            background-color: #1e2a36; /* Uncovered dark stone */
+            cursor: default;
+        }
+        
+        /* Danger Icons */
+        .monster { color: #e74c3c; /* Red for danger */ }
+        .staircase { color: #f1c40f; /* Gold for objective */ }
+        .item-tile { color: #2ecc71; /* Green for beneficial items */ }
+        .boss { color: #ff00ff; font-size: 1.5rem; } /* Unique color for Boss */
+        /* NEW: Class for the revealed, ready-to-click boss tile */
+        .boss-revealed { 
+            background-color: #a040a0; /* Purple/Magent color to signify importance */
+            border: 2px dashed #ff00ff;
+            cursor: pointer;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 0, 255, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 0, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 0, 255, 0); }
+        }
+
+        .flagged { 
+            color: #95a5a6; /* Gray for flag */ 
+            background-color: #3b5065;
+        }
+        
+        /* Danger Count Colors (Classic Minesweeper palette) */
+        .count-1 { color: #3498db; }
+        .count-2 { color: #2ecc71; }
+        .count-3 { color: #e74c3c; }
+        .count-4 { color: #9b59b6; }
+        .count-5 { color: #f39c12; }
+        .count-6 { color: #1abc9c; }
+        .count-7 { color: #e67e22; }
+        .count-8 { color: #c0392b; }
+
+        /* Combat Log Styling */
+        #combat-log {
+            font-size: 0.8rem;
+            height: 100px;
+            overflow-y: scroll;
+            line-height: 1.2;
+        }
+        #combat-log p {
+            padding: 2px 0;
+            border-bottom: 1px dashed #4a6984;
+        }
+        #combat-log p:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center min-h-screen p-4">
+
+    <!-- Game Container -->
+    <div id="app" class="flex flex-col items-center w-full max-w-4xl p-6 bg-gray-700/80 rounded-xl pixel-shadow">
+        <h1 class="text-4xl font-bold mb-6 text-yellow-300 pixel-font">Dungeon Sweeper</h1>
+
+        <!-- Info Panels (Player & Level) -->
+        <div class="flex flex-col md:flex-row justify-between w-full mb-4 p-4 bg-gray-900/50 rounded-lg pixel-shadow space-y-4 md:space-y-0 text-white font-semibold">
+            
+            <!-- Player Stats -->
+            <div id="player-stats" class="flex items-center space-x-4">
+                <span class="text-lg pixel-font text-yellow-200">Lvl: <span id="player-level">1</span></span>
+                <span class="flex items-center">❤️ <span id="player-health">20</span></span>
+                <span class="flex items-center">⚔️ <span id="player-attack">5</span></span>
+                <span class="flex items-center">🛡️ <span id="player-shield">0</span></span>
+            </div>
+            
+            <!-- EXP Bar -->
+            <div class="flex items-center space-x-2 text-sm">
+                <span class="pixel-font">EXP:</span>
+                <div class="w-24 bg-gray-600 rounded-full h-4">
+                    <div id="exp-bar" class="bg-green-500 h-4 rounded-full text-xs text-center text-black font-bold" style="width: 0%">
+                        <span id="exp-value">0/10</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Game Status -->
+            <div class="flex items-center space-x-4">
+                <span class="text-lg pixel-font">Floor: <span id="current-floor">1</span></span>
+                <span class="text-lg">Monsters Left: <span id="monster-left-count">0</span> 🐉</span>
+                <span class="flex items-center">Time: <span id="timer">0</span>s ⏳</span>
+            </div>
+        </div>
+
+        <!-- Inventory Bar -->
+        <div id="inventory-bar" class="w-full text-center mb-6 p-2 bg-gray-800/80 rounded-lg pixel-shadow text-white font-semibold flex justify-center items-center space-x-6 text-sm">
+            <span class="pixel-font text-yellow-300">Inventory:</span>
+            <span class="flex items-center">🧪 Potion: <span id="potion-count">0</span></span>
+            <span class="flex items-center">🛡️ Shield: <span id="temp-shield-count">0</span></span>
+            <span class="flex items-center">✨ Power Shard: <span id="power-shard-count">0</span></span>
+        </div>
+        
+        <!-- Game Display Area (Board or Combat) -->
+        <div id="game-display" class="w-full flex justify-center">
+
+            <!-- 1. Dungeon Grid View -->
+            <div id="game-board" class="game-grid">
+                <!-- Cells injected by JavaScript -->
+            </div>
+
+            <!-- 2. Combat View (Hidden by default) -->
+            <div id="combat-area" class="hidden w-full max-w-sm p-6 bg-red-900/50 border-4 border-red-700 rounded-lg pixel-shadow text-white text-center">
+                <h2 class="text-3xl font-bold mb-4 pixel-font">A Monster Appears!</h2>
+                <div class="flex justify-around items-center mb-6 text-xl font-bold">
+                    <div class="p-3 bg-gray-800 rounded-lg pixel-shadow">
+                        <p class="text-4xl mb-2">🧑</p>
+                        <p>HP: <span id="combat-player-health"></span></p>
+                        <p>ATK: <span id="combat-player-attack"></span></p>
+                        <p>SHLD: <span id="combat-player-shield"></span></p>
+                    </div>
+                    <p class="text-4xl mx-4 pixel-font text-red-500">VS</p>
+                    <div class="p-3 bg-gray-800 rounded-lg pixel-shadow">
+                        <p class="text-4xl mb-2" id="enemy-icon">👹</p>
+                        <p id="enemy-name" class="text-lg text-yellow-300"></p>
+                        <p>HP: <span id="enemy-health"></span></p>
+                        <p>ATK: <span id="enemy-attack"></span></p>
+                    </div>
+                </div>
+                
+                <div id="combat-log" class="text-sm bg-gray-900 p-3 rounded mb-4 text-left">
+                    The battle begins!
+                </div>
+
+                <!-- Active Item Buttons (Only visible/useful in combat) -->
+                <div id="combat-actions" class="flex justify-center space-x-3 mb-4">
+                    <button id="use-potion-button" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg pixel-shadow text-sm disabled:opacity-50">
+                        Use Potion 🧪
+                    </button>
+                    <button id="use-shield-button" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg pixel-shadow text-sm disabled:opacity-50">
+                        Equip Shield 🛡️
+                    </button>
+                    <button id="use-shard-button" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-black font-bold rounded-lg pixel-shadow text-sm disabled:opacity-50">
+                        Use Shard ✨
+                    </button>
+                </div>
+
+                <button id="attack-button" class="w-full px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold text-xl rounded-lg pixel-shadow transition duration-200 disabled:opacity-50 pixel-font">
+                    Attack! ⚔️
+                </button>
+            </div>
+        </div>
+
+        <!-- System Message / Controls -->
+        <div class="mt-6 w-full text-center">
+            <p id="system-message" class="text-green-400 font-semibold h-6 pixel-font text-sm"></p>
+            <button id="reset-button" class="mt-4 px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg pixel-shadow transition duration-200 pixel-font text-sm">
+                New Game
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over/Win Modal -->
+    <div id="game-modal" class="modal fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center hidden z-50">
+        <div class="modal-content bg-gray-800 p-8 border-4 border-yellow-500 rounded-xl pixel-shadow max-w-md w-full text-white text-center">
+            <h2 id="modal-title" class="text-3xl font-bold mb-4 text-yellow-300 pixel-font"></h2>
+            <p id="modal-message" class="mb-6 pixel-font text-sm"></p>
+            <button id="modal-close" class="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg pixel-shadow transition duration-200 pixel-font text-sm">
+                Restart Dungeon Crawl
+            </button>
+        </div>
+    </div>
+    
+    <!-- Boss Confirmation Modal -->
+    <div id="boss-confirm-modal" class="modal fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center hidden z-50">
+        <div class="modal-content bg-gray-800 p-8 border-4 border-red-500 rounded-xl pixel-shadow max-w-md w-full text-white text-center">
+            <h2 class="text-3xl font-bold mb-4 text-red-400 pixel-font">BOSS DETECTED!</h2>
+            <p class="mb-6 pixel-font text-sm">The Dragon King awaits! Are you ready to begin the final battle?</p>
+            <div class="flex justify-center space-x-4">
+                <button id="boss-confirm-start" class="px-6 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg pixel-shadow transition duration-200 pixel-font text-sm">
+                    Fight Now ⚔️
+                </button>
+                <button id="boss-confirm-cancel" class="px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white font-bold rounded-lg pixel-shadow transition duration-200 pixel-font text-sm">
+                    Prepare (Go Back)
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // --- Game Configuration ---
+        const CONFIG = {
+            ROWS: 12,
+            COLS: 12,
+            DRAGONS: 20, 
+            MAX_ITEMS_PER_LEVEL: 2, // Max items per floor
+            START_HEALTH: 20,
+            START_ATTACK: 5,
+            MAX_FLOORS: 3, 
+            EXP_TO_LEVEL: 10, // Initial EXP to level 2
+            ATTACK_PER_LEVEL: 1, 
+        };
+
+        // --- Data Structures ---
+        const ENEMY_TIERS = [
+            { name: "Goblin", hp: 10, atk: 3, icon: '👺', exp: 4 }, 
+            { name: "Giant Spider", hp: 15, atk: 5, icon: '🕷️', exp: 8 }, 
+            { name: "Ogre", hp: 25, atk: 8, icon: '🦍', exp: 12 }, 
+        ];
+        
+        // Final Boss (Floor 3)
+        const BOSS_MONSTER = {
+            name: "Dragon King",
+            hp: 60, 
+            atk: 12, 
+            icon: '🐉', 
+            exp: 50 
+        };
+
+        // Item effects now modify the player inventory count and state
+        const ITEM_DEFINITIONS = {
+            potion: { name: "Full Potion", effect: (p) => { p.health = p.maxHealth; return `Healed to MAX HP!`; }, icon: '🧪' },
+            shield: { name: "Iron Helm", effect: (p) => { p.combatShield++; return `Gained 1 Combat Shield!`; }, icon: '🛡️' },
+            shard: { name: "Power Shard", effect: (p) => { p.tempAttack += 3; p.inventory.shard--; return `Attack permanently boosted by 3 for this fight!`; }, icon: '✨' }, 
+        };
+
+        // --- Game State Variables ---
+        let board = [];
+        let player = {};
+        let currentEnemy = null;
+        let gameState = 'playing'; 
+        let currentFloor = 1;
+        let cellsUncovered = 0;
+        let monsterCount = 0; 
+        let timerInterval;
+        let seconds = 0;
+        let isFirstClick = true; 
+        let staircaseCoords = { r: -1, c: -1 }; 
+        let bossCoords = { r: -1, c: -1 }; 
+        let isBossRevealed = false; // NEW: Track if the boss tile has been revealed
+
+        // --- DOM Elements ---
+        const boardElement = document.getElementById('game-board');
+        const combatArea = document.getElementById('combat-area');
+        const attackButton = document.getElementById('attack-button');
+        const combatLog = document.getElementById('combat-log');
+        const modalCloseButton = document.getElementById('modal-close');
+        
+        // Stats elements
+        const playerLevelEl = document.getElementById('player-level'); 
+        const playerHealthEl = document.getElementById('player-health');
+        const playerAttackEl = document.getElementById('player-attack');
+        const playerShieldEl = document.getElementById('player-shield');
+        const currentFloorEl = document.getElementById('current-floor');
+        const monsterLeftCountEl = document.getElementById('monster-left-count');
+        const timerElement = document.getElementById('timer');
+        const systemMessageEl = document.getElementById('system-message');
+        const expBarEl = document.getElementById('exp-bar'); 
+        const expValueEl = document.getElementById('exp-value'); 
+
+        // Inventory elements
+        const potionCountEl = document.getElementById('potion-count');
+        const tempShieldCountEl = document.getElementById('temp-shield-count');
+        const powerShardCountEl = document.getElementById('power-shard-count');
+
+        // Combat elements
+        const combatPlayerHealthEl = document.getElementById('combat-player-health');
+        const combatPlayerAttackEl = document.getElementById('combat-player-attack');
+        const combatPlayerShieldEl = document.getElementById('combat-player-shield');
+        const enemyNameEl = document.getElementById('enemy-name');
+        const enemyHealthEl = document.getElementById('enemy-health');
+        const enemyAttackEl = document.getElementById('enemy-attack');
+        const enemyIconEl = document.getElementById('enemy-icon');
+        const gameModal = document.getElementById('game-modal');
+
+        // Combat Action Buttons
+        const usePotionButton = document.getElementById('use-potion-button');
+        const useShieldButton = document.getElementById('use-shield-button');
+        const useShardButton = document.getElementById('use-shard-button');
+        
+        // NEW Boss Confirm Modal Elements
+        const bossConfirmModal = document.getElementById('boss-confirm-modal');
+        const bossConfirmStartButton = document.getElementById('boss-confirm-start');
+        const bossConfirmCancelButton = document.getElementById('boss-confirm-cancel');
+
+
+        // Global variable for the authentication state (REQUIRED for canvas environment, though unused here)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // --- Core Game Loop Functions ---
+
+        function startNewGame() {
+            player = {
+                health: CONFIG.START_HEALTH,
+                maxHealth: CONFIG.START_HEALTH, 
+                attack: CONFIG.START_ATTACK,
+                shield: 0, 
+                tempAttack: 0,
+                combatShield: 0, 
+                level: 1, 
+                exp: 0, 
+                expToNextLevel: CONFIG.EXP_TO_LEVEL, 
+                inventory: {
+                    potion: 0,
+                    shield: 0,
+                    shard: 0
+                }
+            };
+            currentFloor = 1;
+            isFirstClick = true; 
+            gameState = 'playing';
+            isBossRevealed = false; // Reset Boss state
+            updatePlayerStatsDisplay();
+            startFloor();
+            resetTimer();
+        }
+
+        function startFloor() {
+            const currentMonsters = CONFIG.DRAGONS + (currentFloor - 1) * 3;
+            monsterCount = currentMonsters;
+
+            boardElement.style.setProperty('--cols', CONFIG.COLS);
+            boardElement.innerHTML = '';
+            board = [];
+            cellsUncovered = 0;
+            updateFloorDisplay();
+            systemMessageEl.textContent = `Floor ${currentFloor}: Click any tile to begin your descent!`;
+            
+            // Reset special coordinates
+            staircaseCoords = { r: -1, c: -1 };
+            bossCoords = { r: -1, c: -1 };
+            isBossRevealed = false;
+
+            // 1. Create the empty grid data structure
+            for (let r = 0; r < CONFIG.ROWS; r++) {
+                board[r] = [];
+                for (let c = 0; c < CONFIG.COLS; c++) {
+                    board[r][c] = {
+                        isMonster: false, isStairs: false, isBoss: false, isItem: false, itemKey: null,
+                        isUncovered: false, isFlagged: false,
+                        nearbyDangers: 0, row: r, col: c, element: null,
+                        isBossReady: false // NEW: This flag shows the boss icon is visible and clickable
+                    };
+                }
+            }
+            
+            // 2. Initial Goal Placement (Will be validated and potentially moved on first click)
+            let goalR, goalC;
+            do {
+                goalR = Math.floor(Math.random() * CONFIG.ROWS);
+                goalC = Math.floor(Math.random() * CONFIG.COLS);
+            } while (goalR < 2 || goalC < 2); 
+
+            if (currentFloor < CONFIG.MAX_FLOORS) {
+                board[goalR][goalC].isStairs = true;
+                staircaseCoords = { r: goalR, c: goalC };
+            } else {
+                board[goalR][goalC].isBoss = true;
+                bossCoords = { r: goalR, c: goalC };
+            }
+
+
+            // 3. Build the DOM grid elements
+            for (let r = 0; r < CONFIG.ROWS; r++) {
+                for (let c = 0; c < CONFIG.COLS; c++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+                    
+                    board[r][c].element = cell;
+
+                    cell.addEventListener('click', () => handleCellClick(r, c));
+                    cell.addEventListener('contextmenu', (e) => {
+                        e.preventDefault();
+                        handleFlag(r, c);
+                    });
+
+                    boardElement.appendChild(cell);
+                }
+            }
+
+            boardElement.classList.remove('hidden');
+            combatArea.classList.add('hidden');
+        }
+
+        /**
+         * Places monsters and items on the board, and ensures the GOAL is outside the initial click zone.
+         * @param {number} startR - Row of the initial player click.
+         * @param {number} startC - Column of the initial player click.
+         */
+        function placeMonsters(startR, startC) {
+            const currentMonsters = CONFIG.DRAGONS + (currentFloor - 1) * 3;
+            let monstersPlaced = 0;
+            const exclusionZone = new Set();
+            
+            // 1. Define the exclusion zone (starting cell and its neighbors)
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    const r = startR + dr;
+                    const c = startC + dc;
+                    if (r >= 0 && r < CONFIG.ROWS && c >= 0 && c < CONFIG.COLS) {
+                        exclusionZone.add(`${r},${c}`);
+                    }
+                }
+            }
+
+            // 2. Validate and move the GOAL (Staircase/Boss) if it's in the exclusion zone
+            let goalR, goalC;
+            let isStairs = currentFloor < CONFIG.MAX_FLOORS;
+            
+            if (isStairs) {
+                goalR = staircaseCoords.r;
+                goalC = staircaseCoords.c;
+            } else {
+                goalR = bossCoords.r;
+                goalC = bossCoords.c;
+            }
+
+            const goalKey = `${goalR},${goalC}`;
+
+            if (exclusionZone.has(goalKey)) {
+                // Clear the old goal position
+                board[goalR][goalC].isStairs = false;
+                board[goalR][goalC].isBoss = false;
+                
+                // Find a new location outside the exclusion zone
+                let newGoalR, newGoalC;
+                do {
+                    newGoalR = Math.floor(Math.random() * CONFIG.ROWS);
+                    newGoalC = Math.floor(Math.random() * CONFIG.COLS);
+                } while (exclusionZone.has(`${newGoalR},${newGoalC}`));
+
+                // Set the new goal position
+                if (isStairs) {
+                    board[newGoalR][newGoalC].isStairs = true;
+                    staircaseCoords = { r: newGoalR, c: newGoalC };
+                } else {
+                    board[newGoalR][newGoalC].isBoss = true;
+                    bossCoords = { r: newGoalR, c: newGoalC };
+                }
+            }
+            
+            // 3. Place monsters randomly
+            const finalGoalR = isStairs ? staircaseCoords.r : bossCoords.r;
+            const finalGoalC = isStairs ? staircaseCoords.c : bossCoords.c;
+
+            while (monstersPlaced < currentMonsters) {
+                const r = Math.floor(Math.random() * CONFIG.ROWS);
+                const c = Math.floor(Math.random() * CONFIG.COLS);
+
+                const isGoal = (r === finalGoalR && c === finalGoalC);
+
+                if (!board[r][c].isMonster && !isGoal && !exclusionZone.has(`${r},${c}`)) {
+                    board[r][c].isMonster = true;
+                    monstersPlaced++;
+                }
+            }
+            
+            // 4. Calculate danger and place items
+            calculateNearbyDangers();
+            placeItems(exclusionZone);
+        }
+
+        /**
+         * Places a fixed number of items on safe, non-goal, non-start tiles.
+         * @param {Set} exclusionZone - Tiles that were cleared on the first click.
+         */
+        function placeItems(exclusionZone) {
+            const itemKeys = Object.keys(ITEM_DEFINITIONS);
+            
+            // Gather all possible safe spots
+            const possibleItemLocations = [];
+            for (let r = 0; r < CONFIG.ROWS; r++) {
+                for (let c = 0; c < CONFIG.COLS; c++) {
+                    const cell = board[r][c];
+                    // Safe conditions: not monster, not goal, danger is 0, and not in the initial cleared zone
+                    if (!cell.isMonster && !cell.isStairs && !cell.isBoss && cell.nearbyDangers === 0 && !exclusionZone.has(`${r},${c}`)) {
+                        possibleItemLocations.push(cell);
+                    }
+                }
+            }
+
+            // Shuffle the locations to pick items randomly
+            for (let i = possibleItemLocations.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [possibleItemLocations[i], possibleItemLocations[j]] = [possibleItemLocations[j], possibleItemLocations[i]];
+            }
+
+            // Place exactly MAX_ITEMS_PER_LEVEL items
+            for (let i = 0; i < CONFIG.MAX_ITEMS_PER_LEVEL && i < possibleItemLocations.length; i++) {
+                const cell = possibleItemLocations[i];
+                cell.isItem = true;
+                // Randomly assign one of the defined item types
+                cell.itemKey = itemKeys[Math.floor(Math.random() * itemKeys.length)];
+            }
+        }
+
+
+        function calculateNearbyDangers() {
+            for (let r = 0; r < CONFIG.ROWS; r++) {
+                for (let c = 0; c < CONFIG.COLS; c++) {
+                    board[r][c].nearbyDangers = 0;
+
+                    // The Boss tile acts like a monster for counting purposes
+                    if (board[r][c].isMonster || board[r][c].isBoss) continue;
+                    
+                    let count = 0;
+                    for (let dr = -1; dr <= 1; dr++) {
+                        for (let dc = -1; dc <= 1; dc++) {
+                            if (dr === 0 && dc === 0) continue; 
+                            
+                            const neighborR = r + dr;
+                            const neighborC = c + dc;
+
+                            if (neighborR >= 0 && neighborR < CONFIG.ROWS && 
+                                neighborC >= 0 && neighborC < CONFIG.COLS) {
+                                
+                                if (board[neighborR][neighborC].isMonster || board[neighborR][neighborC].isBoss) {
+                                    count++;
+                                }
+                            }
+                        }
+                    }
+                    board[r][c].nearbyDangers = count;
+                }
+            }
+        }
+
+        /**
+         * Checks if a neighbor of the given coordinates is the Boss tile.
+         * If so, it reveals the Boss.
+         */
+        function checkRevealBoss(r, c) {
+            if (currentFloor !== CONFIG.MAX_FLOORS || isBossRevealed) return;
+
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    if (dr === 0 && dc === 0) continue; 
+                    
+                    const neighborR = r + dr;
+                    const neighborC = c + dc;
+
+                    if (neighborR >= 0 && neighborR < CONFIG.ROWS && neighborC >= 0 && neighborC < CONFIG.COLS) {
+                        const cell = board[neighborR][neighborC];
+                        
+                        if (cell.isBoss) {
+                            cell.isBossReady = true;
+                            isBossRevealed = true;
+                            cell.element.classList.add('boss-revealed');
+                            cell.element.innerHTML = BOSS_MONSTER.icon;
+                            systemMessageEl.textContent = `A powerful presence is detected nearby!`;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Player Interaction Handlers ---
+
+        function handleCellClick(r, c) {
+            const cellData = board[r][c];
+
+            if (gameState !== 'playing' || cellData.isFlagged) {
+                return;
+            }
+
+            // --- BOSS INTERACTION (NEW LOGIC) ---
+            if (cellData.isBossReady) {
+                // If the Boss is revealed and clicked, trigger confirmation
+                setupBossEncounter(r, c);
+                return;
+            }
+
+            // --- QUICK CLEAR LOGIC ---
+            if (cellData.isUncovered && cellData.nearbyDangers > 0) {
+                handleQuickClear(r, c);
+                return;
+            }
+            // -----------------------------
+
+            if (cellData.isUncovered) {
+                return;
+            }
+
+            if (isFirstClick) {
+                startTimer(); 
+                placeMonsters(r, c); 
+                isFirstClick = false; 
+                systemMessageEl.textContent = `Dungeon map stabilized. Begin your crawl!`;
+            }
+
+            // 1. Monster Encounter (Boss is handled above/below)
+            if (cellData.isMonster) {
+                
+                const enemyTierIndex = Math.min(currentFloor - 1, ENEMY_TIERS.length - 1);
+                const enemyTemplate = ENEMY_TIERS[enemyTierIndex];
+                
+                currentEnemy = {
+                    ...enemyTemplate,
+                    health: enemyTemplate.hp + (currentFloor - 1) * 2,
+                    attack: enemyTemplate.atk + (currentFloor - 1) * 1,
+                    exp: enemyTemplate.exp, 
+                    element: cellData.element, 
+                    r: r, c: c,
+                    isBoss: false
+                };
+
+                enterCombat();
+                return;
+            }
+            
+            // 2. Staircase Found (Next Level)
+            if (cellData.isStairs) {
+                currentFloor++;
+                systemMessageEl.textContent = `Staircase found! Proceeding to Floor ${currentFloor}.`;
+                isFirstClick = true; 
+                startFloor();
+                return;
+            }
+
+            // 3. Recursive reveal
+            revealCell(r, c);
+            
+            // 4. Check for Boss reveal after a cell is uncovered
+            if (currentFloor === CONFIG.MAX_FLOORS) {
+                checkRevealBoss(r, c);
+            }
+        }
+        
+        /**
+         * Sets up the Boss encounter flow using the confirmation modal.
+         */
+        function setupBossEncounter(r, c) {
+            // Store the boss coordinates for the fight start
+            bossCoords.r = r;
+            bossCoords.c = c;
+            bossConfirmModal.classList.remove('hidden');
+            gameState = 'paused';
+        }
+
+        /**
+         * The Quick Clear (Chording) function.
+         */
+        function handleQuickClear(r, c) {
+            const cellData = board[r][c];
+            let flagCount = 0;
+            let neighborsToReveal = [];
+            let hitMonster = false;
+            let hitBoss = false;
+
+            // 1. Count neighboring flags and find unflagged neighbors
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    if (dr === 0 && dc === 0) continue; 
+                    
+                    const neighborR = r + dr;
+                    const neighborC = c + dc;
+
+                    if (neighborR >= 0 && neighborR < CONFIG.ROWS && neighborC >= 0 && neighborC < CONFIG.COLS) {
+                        const neighborData = board[neighborR][neighborC];
+
+                        if (neighborData.isFlagged) {
+                            flagCount++;
+                        } else if (!neighborData.isUncovered) {
+                            neighborsToReveal.push({r: neighborR, c: neighborC});
+                        }
+                    }
+                }
+            }
+
+            // 2. Check if the flag count matches the danger number
+            if (flagCount === cellData.nearbyDangers) {
+                // If counts match, attempt to reveal all unflagged neighbors
+                for (const neighbor of neighborsToReveal) {
+                    const nData = board[neighbor.r][neighbor.c];
+                    
+                    if (nData.isBoss) {
+                        // If Quick Clear reveals the Boss, just reveal the icon, DON'T start combat
+                        checkRevealBoss(r, c);
+                        hitBoss = true;
+                    }
+                    else if (nData.isMonster) {
+                        // If we hit a monster, trigger combat instantly
+                        handleCellClick(neighbor.r, neighbor.c);
+                        hitMonster = true;
+                        break;
+                    }
+                    
+                    // Only reveal safe/non-monster/non-boss tiles
+                    if (!nData.isBoss) {
+                       revealCell(neighbor.r, neighbor.c);
+                    }
+                }
+
+                if (!hitMonster) {
+                    systemMessageEl.textContent = `Quick Clear successful: ${neighborsToReveal.length} tiles revealed!`;
+                    if (hitBoss) {
+                        systemMessageEl.textContent += ` (Boss nearby!)`;
+                    }
+                }
+
+            } else {
+                systemMessageEl.textContent = `Flag count (${flagCount}) does not match danger count (${cellData.nearbyDangers}). Quick Clear ignored.`;
+            }
+        }
+
+
+        function revealCell(r, c) {
+            // Boss tile should not be recursively cleared
+            if (r < 0 || r >= CONFIG.ROWS || c < 0 || c >= CONFIG.COLS || board[r][c].isUncovered || board[r][c].isMonster || board[r][c].isBoss) {
+                return;
+            }
+            
+            // Check if goal tile is hit by sweep
+            if (board[r][c].isStairs) {
+                board[r][c].element.innerHTML = '⬇️';
+                board[r][c].element.classList.add('staircase');
+                return;
+            }
+
+            const cellData = board[r][c];
+            cellData.isUncovered = true;
+            cellsUncovered++;
+            
+            const cellElement = cellData.element;
+            cellElement.classList.add('uncovered');
+            cellElement.innerHTML = '';
+            
+            // Check for item pickup (Now adds to inventory)
+            if (cellData.isItem) {
+                const itemDef = ITEM_DEFINITIONS[cellData.itemKey];
+                player.inventory[cellData.itemKey]++;
+                
+                cellElement.innerHTML = itemDef.icon; 
+                cellElement.classList.add('item-tile');
+                systemMessageEl.textContent = `Found ${itemDef.name}! Added to Inventory.`;
+                
+                cellData.isItem = false; 
+                cellData.itemKey = null;
+                updatePlayerStatsDisplay();
+            }
+
+            if (cellData.nearbyDangers > 0) {
+                cellElement.textContent = cellData.nearbyDangers;
+                cellElement.classList.add(`count-${cellData.nearbyDangers}`);
+                
+                // New: Check for Boss reveal when a numbered tile is revealed
+                if (currentFloor === CONFIG.MAX_FLOORS) {
+                    checkRevealBoss(r, c);
+                }
+                return;
+            }
+
+            // If nearbyDangers is 0, recursively clear neighbors
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    if (dr !== 0 || dc !== 0) {
+                        revealCell(r + dr, c + dc);
+                    }
+                }
+            }
+        }
+
+        function handleFlag(r, c) {
+            if (gameState !== 'playing' || board[r][c].isUncovered) {
+                return;
+            }
+
+            const cellData = board[r][c];
+            const cellElement = cellData.element;
+
+            cellData.isFlagged = !cellData.isFlagged;
+
+            if (cellData.isFlagged) {
+                cellElement.classList.add('flagged');
+                cellElement.innerHTML = '🚩'; 
+            } else {
+                cellElement.classList.remove('flagged');
+                cellElement.innerHTML = '';
+            }
+        }
+
+        // --- RPG & Combat Functions ---
+
+        function gainExp(amount) {
+            player.exp += amount;
+            systemMessageEl.textContent = `Gained ${amount} EXP!`;
+            updatePlayerStatsDisplay(); // Update bar immediately
+
+            while (player.exp >= player.expToNextLevel) {
+                player.exp -= player.expToNextLevel;
+                checkLevelUp();
+            }
+        }
+
+        function checkLevelUp() {
+            player.level++;
+            player.attack += CONFIG.ATTACK_PER_LEVEL;
+            player.health = player.maxHealth; 
+            player.expToNextLevel = Math.round(player.expToNextLevel * 2.0); 
+
+            systemMessageEl.textContent = `✨ LEVELED UP to LVL ${player.level}! Attack +${CONFIG.ATTACK_PER_LEVEL} & Full Heal!`;
+            updatePlayerStatsDisplay(); 
+        }
+        
+        function enterCombat() {
+            // This function is now only used for regular monster fights or after boss confirmation
+            gameState = 'combat';
+            boardElement.classList.add('hidden');
+            combatArea.classList.remove('hidden');
+            player.combatShield = 0; 
+            player.tempAttack = 0; 
+            
+            combatLog.innerHTML = `<p class="text-red-300">A dangerous ${currentEnemy.name} blocks your path!</p>`;
+            if (currentEnemy.isBoss) {
+                combatLog.innerHTML += `<p class="text-purple-400 pixel-font">FINAL BOSS ENCOUNTER!</p>`;
+            }
+
+            attackButton.disabled = false;
+            updateCombatDisplay();
+            updateItemButtonStates(); 
+        }
+
+        function useItem(itemKey) {
+            if (gameState !== 'combat' || player.inventory[itemKey] <= 0) return;
+
+            const itemDef = ITEM_DEFINITIONS[itemKey];
+            
+            if (itemKey === 'potion') {
+                player.inventory.potion--;
+                const message = itemDef.effect(player);
+                combatLog.innerHTML += `<p class="text-green-400">Used ${itemDef.icon} ${itemDef.name}. ${message}</p>`;
+            } else if (itemKey === 'shield') {
+                player.inventory.shield--;
+                const message = itemDef.effect(player);
+                combatLog.innerHTML += `<p class="text-blue-400">Used ${itemDef.icon} ${itemDef.name}. ${message}</p>`;
+            } else if (itemKey === 'shard') {
+                const message = itemDef.effect(player);
+                combatLog.innerHTML += `<p class="text-yellow-400">Used ${itemDef.icon} ${itemDef.name}. ${message}</p>`;
+            }
+
+            updateCombatDisplay();
+            updateItemButtonStates(); 
+        }
+
+
+        function combatRound() {
+            if (gameState !== 'combat') return;
+
+            const log = (msg) => {
+                combatLog.innerHTML += `<p>${msg}</p>`;
+                combatLog.scrollTop = combatLog.scrollHeight;
+            }
+
+            // 1. Player's Turn
+            const playerDamage = player.attack + player.tempAttack;
+            currentEnemy.health -= playerDamage;
+            log(`<span class="text-green-400">You strike the ${currentEnemy.name} for ${playerDamage} damage!</span>`);
+            
+            if (currentEnemy.health <= 0) {
+                currentEnemy.health = 0;
+                log(`<p class="text-yellow-400">You defeated the ${currentEnemy.name}!</p>`);
+                
+                exitCombat(true);
+                return;
+            }
+
+            // 2. Enemy's Turn
+            let enemyDamage = currentEnemy.attack;
+
+            if (player.combatShield > 0) {
+                player.combatShield--;
+                log(`<span class="text-blue-400">Your shield absorbs the ${currentEnemy.name}'s attack!</span>`);
+            } else {
+                player.health -= enemyDamage;
+                log(`<span class="text-red-400">${currentEnemy.name} hits you for ${enemyDamage} damage.</span>`);
+            }
+
+            if (player.health <= 0) {
+                player.health = 0;
+                log(`<p class="text-red-400">The ${currentEnemy.name} lands a killing blow!</p>`);
+                exitCombat(false);
+                return;
+            }
+
+            updateCombatDisplay();
+        }
+
+        function exitCombat(playerWon) {
+            attackButton.disabled = true;
+            gameState = 'playing';
+
+            if (playerWon) {
+                // Call gainExp here with the current enemy's EXP reward
+                gainExp(currentEnemy.exp);
+
+                const r = currentEnemy.r;
+                const c = currentEnemy.c;
+                const cellData = board[r][c];
+                
+                // If the player defeats the Boss, the game ends immediately.
+                if (currentEnemy.isBoss) {
+                    endGame(true, `You defeated the mighty Dragon King and completed the Dungeon Sweep!`);
+                    return; 
+                }
+
+                // Normal monster defeated logic: clear tile
+                cellData.isMonster = false;
+                cellData.isUncovered = true; 
+                cellsUncovered++;
+                monsterCount--;
+                
+                cellData.element.innerHTML = '💥'; 
+                cellData.element.classList.add('uncovered');
+
+                calculateNearbyDangers();
+                renderUncoveredCells(); // Rerender to update nearby numbers
+
+                if (!systemMessageEl.textContent.includes("LEVELED UP")) {
+                    systemMessageEl.textContent = `You defeated the ${currentEnemy.name}! Current HP: ${player.health}`;
+                }
+                player.tempAttack = 0; 
+                player.combatShield = 0; 
+                player.inventory.shard = 0; 
+            } else {
+                // Simplified defeat message
+                endGame(false, `Your quest ends here.`);
+            }
+            
+            updatePlayerStatsDisplay();
+            updateFloorDisplay();
+
+            setTimeout(() => {
+                combatArea.classList.add('hidden');
+                boardElement.classList.remove('hidden');
+            }, 1500); 
+        }
+
+        // --- Utility Functions ---
+
+        function renderUncoveredCells() {
+             for (let r = 0; r < CONFIG.ROWS; r++) {
+                for (let c = 0; c < CONFIG.COLS; c++) {
+                    const cellData = board[r][c];
+                    const cellElement = cellData.element;
+                    
+                    if (cellData.isUncovered) {
+                        cellElement.className = 'cell uncovered';
+
+                        if (cellData.isStairs) {
+                            cellElement.innerHTML = '⬇️';
+                            cellElement.classList.add('staircase');
+                        } else if (cellData.nearbyDangers > 0) {
+                            cellElement.textContent = cellData.nearbyDangers;
+                            cellElement.classList.add(`count-${cellData.nearbyDangers}`);
+                        } else if (cellData.isItem) {
+                            const itemDef = ITEM_DEFINITIONS[cellData.itemKey];
+                            cellElement.innerHTML = itemDef.icon; 
+                            cellElement.classList.add('item-tile');
+                        } else if (cellData.isMonster) {
+                            cellElement.innerHTML = '💥';
+                        } else {
+                            cellElement.innerHTML = '';
+                        }
+                    } else if (cellData.isBossReady) {
+                        // Boss is revealed and waiting for click
+                        cellElement.className = 'cell boss-revealed';
+                        cellElement.innerHTML = BOSS_MONSTER.icon;
+                    } 
+                    else if (cellData.isFlagged) {
+                        cellElement.classList.add('flagged');
+                        cellElement.innerHTML = '🚩';
+                    } else {
+                        // Ensure covered tiles stay covered (This handles the boss tile before it's revealed)
+                        cellElement.className = 'cell';
+                        cellElement.innerHTML = '';
+                    }
+                }
+            }
+        }
+
+
+        function updatePlayerStatsDisplay() {
+            playerLevelEl.textContent = player.level;
+            playerHealthEl.textContent = player.health;
+            playerAttackEl.textContent = player.attack + player.tempAttack;
+            playerShieldEl.textContent = player.shield; 
+
+            // Inventory counts
+            potionCountEl.textContent = player.inventory.potion;
+            tempShieldCountEl.textContent = player.inventory.shield;
+            powerShardCountEl.textContent = player.inventory.shard;
+
+            // EXP Bar Update
+            const expPercentage = (player.exp / player.expToNextLevel) * 100;
+            expBarEl.style.width = `${Math.min(expPercentage, 100)}%`; 
+            expValueEl.textContent = `${player.exp}/${player.expToNextLevel}`;
+
+            if (gameState === 'combat') {
+                combatPlayerHealthEl.textContent = player.health;
+                combatPlayerAttackEl.textContent = player.attack + player.tempAttack;
+                combatPlayerShieldEl.textContent = player.combatShield;
+            }
+        }
+
+        function updateFloorDisplay() {
+            currentFloorEl.textContent = currentFloor;
+            monsterLeftCountEl.textContent = monsterCount;
+        }
+
+        function updateCombatDisplay() {
+            updatePlayerStatsDisplay();
+            enemyNameEl.textContent = currentEnemy.name;
+            enemyHealthEl.textContent = currentEnemy.health;
+            enemyAttackEl.textContent = currentEnemy.attack;
+            enemyIconEl.textContent = currentEnemy.icon;
+        }
+
+        function updateItemButtonStates() {
+            usePotionButton.disabled = !(gameState === 'combat' && player.inventory.potion > 0);
+            useShieldButton.disabled = !(gameState === 'combat' && player.inventory.shield > 0);
+            useShardButton.disabled = !(gameState === 'combat' && player.inventory.shard > 0 && player.tempAttack === 0);
+        }
+
+        function endGame(didWin, message) {
+            gameState = 'finished';
+            stopTimer();
+
+            const modalTitleEl = document.getElementById('modal-title');
+            const modalMessageEl = document.getElementById('modal-message');
+
+            if (didWin) {
+                modalTitleEl.textContent = "DUNGEON CONQUERED!";
+            } else {
+                modalTitleEl.textContent = "DEFEATED!";
+            }
+            modalMessageEl.textContent = `${message} Final Run Time: ${seconds} seconds.`;
+            document.getElementById('reset-button').textContent = "Start New Game";
+            gameModal.classList.remove('hidden');
+        }
+
+        // --- Timer Functions ---
+
+        function startTimer() {
+            seconds = 0;
+            timerElement.textContent = seconds;
+            clearInterval(timerInterval); 
+            timerInterval = setInterval(() => {
+                seconds++;
+                timerElement.textContent = seconds;
+            }, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+        }
+
+        function resetTimer() {
+            stopTimer();
+            seconds = 0;
+            timerElement.textContent = seconds;
+        }
+
+
+        // --- Boss Confirmation Event Handlers ---
+
+        bossConfirmStartButton.addEventListener('click', () => {
+            bossConfirmModal.classList.add('hidden');
+            
+            // Set up the currentEnemy object for the Boss
+            const enemyTemplate = BOSS_MONSTER;
+            const r = bossCoords.r;
+            const c = bossCoords.c;
+
+            currentEnemy = {
+                ...enemyTemplate,
+                health: enemyTemplate.hp + (CONFIG.MAX_FLOORS - 1) * 5, // Scaling boss HP
+                attack: enemyTemplate.atk + (CONFIG.MAX_FLOORS - 1) * 2, // Scaling boss ATK
+                exp: enemyTemplate.exp, 
+                element: board[r][c].element, 
+                r: r, c: c,
+                isBoss: true
+            };
+            enterCombat(); // Start the fight!
+        });
+
+        bossConfirmCancelButton.addEventListener('click', () => {
+            bossConfirmModal.classList.add('hidden');
+            gameState = 'playing'; // Unpause the game
+        });
+
+
+        // --- General Event Listeners and Initial Setup ---
+
+        document.getElementById('reset-button').addEventListener('click', startNewGame);
+        attackButton.addEventListener('click', combatRound);
+
+        usePotionButton.addEventListener('click', () => useItem('potion'));
+        useShieldButton.addEventListener('click', () => useItem('shield'));
+        useShardButton.addEventListener('click', () => useItem('shard'));
+
+        modalCloseButton.addEventListener('click', () => {
+            gameModal.classList.add('hidden');
+            startNewGame();
+        });
+
+        window.onload = startNewGame;
+    </script>
+</body>
+</html>
